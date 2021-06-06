@@ -89,11 +89,6 @@ def download_file(ddir, url, name = None, **kwargs):
                 if filename is None:
                     filename = get_filename_from_cd(r.headers.get('content-disposition')) or (str(uuid.uuid4()) + extension)
                 filename = slugify(filename)
-                # ensure unique filename
-                try:
-                    check_for_duplicate(join(ddir, filename), join(ddir, temp_name))
-                except DuplicateException:
-                    return filename, r
                 # content integrity
                 if r.headers.get('content-length') and r.raw.tell() < int(r.headers.get('content-length')):
                     reported_size = r.raw.tell()

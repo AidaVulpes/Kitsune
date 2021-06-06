@@ -19,7 +19,7 @@ from flask import current_app
 
 from ..internals.database.database import get_conn
 from ..lib.artist import index_artists, is_artist_dnp
-from ..lib.post import post_flagged, post_exists, delete_post_flags
+from ..lib.post import post_flagged, post_exists, delete_post_flags, move_to_backup, delete_backup, restore_from_backup
 from ..internals.utils.download import download_file, DownloaderException
 from ..internals.utils.proxy import get_proxy
 from ..internals.utils.logger import log
@@ -323,6 +323,7 @@ def import_campaign_page(url, key, import_id):
     conn = get_conn()
     user_id = None
     for post in scraper_data['data']:
+        backup_path = None
         try:
             user_id = post['relationships']['user']['data']['id']
             post_id = post['id']
@@ -340,6 +341,9 @@ def import_campaign_page(url, key, import_id):
             if post_exists('patreon', user_id, post_id) and not post_flagged('patreon', user_id, post_id):
                 log(import_id, f'Skipping post {post_id} from user {user_id} because already exists', to_client = True)
                 continue
+
+            if post_flagged('patreon', user_id, post_id):
+                backup_path = move_to_backup('patreon', user_id, post_id)
 
             log(import_id, f"Starting import: {post_id} from user {user_id}")
 
@@ -449,10 +453,14 @@ def import_campaign_page(url, key, import_id):
                 requests.request('BAN', f"{config.ban_url}/{post_model['service']}/user/" + post_model['"user"'])
                 requests.request('BAN', f"{config.ban_url}/api/{post_model['service']}/user/" + post_model['"user"'])
 
-            log(import_id, f"Finished importing {post_id} from user {user_id}", to_client = False)
+            if backup_path is not None:
+                delete_backup(backup_path)
+            log(import_id, f"Finished importing {post_id} from user {user_id}", to_client=False)
         except Exception as e:
             log(import_id, f"Error while importing {post_id} from user {user_id}", 'exception', True)
             conn.rollback()
+            if backup_path is not None:
+                restore_from_backup('patreon', user_id, post_id, backup_path)
             continue
     
     if 'links' in scraper_data and 'next' in scraper_data['links']:

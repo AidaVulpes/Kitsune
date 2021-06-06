@@ -17,7 +17,7 @@ from flask import current_app
 
 from ..internals.database.database import get_conn
 from ..lib.artist import index_artists, is_artist_dnp
-from ..lib.post import post_flagged, post_exists, delete_post_flags
+from ..lib.post import post_flagged, post_exists, delete_post_flags, move_to_backup, restore_from_backup, delete_backup
 from ..internals.utils.download import download_file, DownloaderException
 from ..internals.utils.proxy import get_proxy
 from ..internals.utils.logger import log
@@ -52,6 +52,7 @@ def import_posts(import_id, key):
     conn = get_conn()
     user_id = None
     for message in j.data:
+        backup_path = None
         try:
             if message[0] == Message.Directory:
                 post = message[-1]
@@ -68,6 +69,9 @@ def import_posts(import_id, key):
                 if post_exists('subscribestar', user_id, str(post_id)) and not post_flagged('subscribestar', user_id, str(post_id)):
                     log(import_id, f'Skipping post {post_id} from user {user_id} because already exists')
                     continue
+
+                if post_flagged('subscribestar', user_id, str(post_id)):
+                    backup_path = move_to_backup('patreon', user_id, post_id)
 
                 log(import_id, f"Starting import: {post_id}")
 
@@ -130,10 +134,15 @@ def import_posts(import_id, key):
                     requests.request('BAN', f"{config.ban_url}/{post_model['service']}/user/" + post_model['"user"'])
                     requests.request('BAN', f"{config.ban_url}/api/{post_model['service']}/user/" + post_model['"user"'])
 
+                if backup_path is not None:
+                    delete_backup(backup_path)
                 log(import_id, f"Finished importing {post_id} from user {user_id}", to_client = False)
         except Exception:
             log(import_id, f"Error while importing {post_id} from user {user_id}", 'exception')
             conn.rollback()
+
+            if backup_path is not None:
+                restore_from_backup('fanbox', user_id, post_id, backup_path)
             continue
     
     log(import_id, f"Finished scanning for posts.")
