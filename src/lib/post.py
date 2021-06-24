@@ -4,7 +4,7 @@ import tempfile
 from os import makedirs
 
 from ..internals.cache.redis import delete_keys
-from ..internals.database.database import get_cursor, get_conn, return_conn
+from ..internals.database.database import get_cursor, get_conn, return_conn, get_raw_conn
 from shutil import rmtree
 from os.path import join
 import config
@@ -22,28 +22,39 @@ def delete_all_post_cache_keys():
     delete_keys(keys)
 
 def post_exists(service, artist_id, post_id):
-    cursor = get_cursor()
+    conn = get_raw_conn()
+    cursor = conn.cursor()
     cursor.execute("SELECT id FROM posts WHERE id = %s AND \"user\" = %s AND service = %s", (post_id, artist_id, service,))
-    return len(cursor.fetchall()) > 0
+    existing_posts = cursor.fetchall()
+    cursor.close()
+    return_conn(conn)
+    return len(existing_posts) > 0
 
 def post_flagged(service, artist_id, post_id):
-    cursor = get_cursor()
+    conn = get_raw_conn()
+    cursor = conn.cursor()
     cursor.execute('SELECT id FROM booru_flags WHERE service = %s AND "user" = %s AND id = %s', (service, artist_id, post_id))
     existing_flags = cursor.fetchall()
+    cursor.close()
+    return_conn(conn)
     return len(existing_flags) > 0
 
 def discord_post_exists(server_id, channel_id, post_id):
-    cursor = get_cursor()
+    conn = get_raw_conn()
+    cursor = conn.cursor()
     cursor.execute("SELECT id FROM discord_posts WHERE id = %s AND server = %s AND channel = %s", (post_id, server_id, channel_id))
-    return len(cursor.fetchall()) > 0
+    existing_posts = cursor.fetchall()
+    cursor.close()
+    return_conn(conn)
+    return len(existing_posts) > 0
 
 def delete_post_flags(service, artist_id, post_id):
-    conn = get_conn()
-    cursor = get_cursor()
+    conn = get_raw_conn()
+    cursor = conn.cursor()
     cursor.execute('DELETE FROM booru_flags WHERE service = %s AND "user" = %s AND id = %s', (service, artist_id, post_id))
+    cursor.close()
     conn.commit()
     return_conn(conn)
-
 
 def get_base_paths(service_name, user_id, post_id):
     if service_name == 'patreon':

@@ -14,7 +14,7 @@ import json
 from ..internals.utils.logger import log
 from ..internals.utils.scrapper import create_scrapper_session
 from ..internals.utils.proxy import get_proxy
-from ..internals.database.database import get_conn
+from ..internals.database.database import get_conn, get_raw_conn, return_conn
 from ..lib.artist import index_discord_channel_server, is_artist_dnp
 from ..lib.post import discord_post_exists
 from ..internals.utils.download import download_file, DownloaderException
@@ -72,7 +72,6 @@ def process_channel(channel_id, server_id, import_id, key, before = None):
         log(import_id, 'Error connecting to cloudscraper. Please try again.', 'exception')
         return False
 
-    conn = get_conn()
     for post in scraper_data:
         try:
             post_id = post['id']
@@ -131,9 +130,11 @@ def process_channel(channel_id, server_id, import_id, key, before = None):
                 updates = ','.join([f'{column}=EXCLUDED.{column}' for column in columns])
             )
 
+            conn = get_raw_conn()
             cursor = conn.cursor()
             cursor.execute(query, list(post_model.values()))
             conn.commit()        
+            return_conn(conn)
 
             if (config.ban_url):
                 requests.request('BAN', f"{config.ban_url}/discord/server/{post_model['server']}")
@@ -143,7 +144,6 @@ def process_channel(channel_id, server_id, import_id, key, before = None):
             log(import_id, f"Finished importing {post_id} from channel {channel_id}", to_client = False)    
         except Exception as e:
             log(import_id, f"Error while importing {post_id} from channel {channel_id}", 'exception', True)
-            conn.rollback()
             continue
     
     if(len(scraper_data) >= 50):

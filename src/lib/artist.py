@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 import cloudscraper
 import requests
 import logging
+import config
 
 from ..internals.utils.proxy import get_proxy
 from ..internals.cache.redis import delete_keys, delete_keys_pattern
@@ -33,9 +34,13 @@ def delete_all_artist_keys():
     delete_keys(keys)
 
 def is_artist_dnp(service, artist_id):
-    cursor = get_cursor()
+    conn = get_raw_conn()
+    cursor = conn.cursor()
     cursor.execute("SELECT * FROM dnp WHERE id = %s AND service = %s", (artist_id, service,))
-    return len(cursor.fetchall()) > 0
+    results = cursor.fetchall()
+    cursor.close()
+    return_conn(conn)
+    return len(results) > 0
 
 def index_artists():
     conn = get_raw_conn()
@@ -48,7 +53,7 @@ def index_artists():
         try:
             if post["service"] == 'patreon':
                 scraper = cloudscraper.create_scraper()
-                user = scraper.get('https://www.patreon.com/api/user/' + post["user"], proxies=get_proxy()).json()
+                user = scraper.get('https://api.patreon.com/user/' + post["user"], proxies=get_proxy()).json()
                 model = {
                     "id": post["user"],
                     "name": user["data"]["attributes"]["vanity"] or user["data"]["attributes"]["full_name"],
@@ -66,7 +71,7 @@ def index_artists():
                 soup = BeautifulSoup(resp, 'html.parser')
                 model = {
                     "id": post["user"],
-                    "name": soup.find('h2', class_='creator-profile-card__name js-creator-name').string.replace("\n", ""),
+                    "name": soup.find('strong', class_='creator-profile-card__name').string.replace("\n", ""),
                     "service": "gumroad"
                 }
             elif post["service"] == 'subscribestar':
@@ -87,10 +92,20 @@ def index_artists():
                 }
 
             write_model_to_db(conn, cursor, model)
+
+            if (config.ban_url):
+                requests.request('BAN', f"{config.ban_url}/{post['service']}/user/" + post['user'])
         except Exception:
             logging.exception(f"Error while indexing user {post['user']}")
 
     cursor.close()
+    return_conn(conn)
+
+def update_artist(service, artist_id):
+    conn = get_raw_conn()
+    cursor = get_cursor()
+    cursor.execute('UPDATE lookup SET updated = CURRENT_TIMESTAMP WHERE service = %s AND id = %s', (service, artist_id))
+    conn.commit()
     return_conn(conn)
 
 def index_discord_channel_server(channel_data, server_data):

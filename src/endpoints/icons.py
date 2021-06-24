@@ -1,6 +1,7 @@
 from flask import Blueprint, redirect, current_app
 
 import re
+import cssutils
 import config
 import requests
 import cloudscraper
@@ -19,7 +20,7 @@ def import_icon(service, user):
     if not exists(join(config.download_path, 'icons', service, user)):
         try:
             if service == 'patreon':
-                scraper = cloudscraper.create_scraper().get('https://www.patreon.com/api/user/' + user, proxies=get_proxy())
+                scraper = cloudscraper.create_scraper().get('https://api.patreon.com/user/' + user, proxies=get_proxy())
                 data = scraper.json()
                 scraper.raise_for_status()
                 download_file(
@@ -54,9 +55,11 @@ def import_icon(service, user):
                 data = scraper.text
                 scraper.raise_for_status()
                 soup = BeautifulSoup(data, 'html.parser')
+                sheet = cssutils.css.CSSStyleSheet()
+                sheet.add("dummy_selector { %s }" % soup.select_one('.profile-picture-medium.js-profile-picture').get('style'))
                 download_file(
                     join(config.download_path, 'icons', service),
-                    re.findall(r'(?:http\:|https\:)?\/\/.*\.(?:png|jpe?g|gif)', soup.find('div', class_='profile-picture js-profile-picture')['style'], re.IGNORECASE)[0],
+                    list(cssutils.getUrls(sheet))[0],
                     name = user
                 )
             else:

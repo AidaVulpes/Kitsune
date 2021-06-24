@@ -13,8 +13,8 @@ from os import makedirs
 
 from flask import current_app
 
-from ..internals.database.database import get_conn
-from ..lib.artist import index_artists, is_artist_dnp
+from ..internals.database.database import get_conn, get_raw_conn, return_conn
+from ..lib.artist import index_artists, is_artist_dnp, update_artist
 from ..lib.post import post_flagged, post_exists, delete_post_flags
 from ..internals.utils.download import download_file, DownloaderException
 from ..internals.utils.proxy import get_proxy
@@ -40,24 +40,24 @@ def import_posts(import_id, key, offset = 1):
 
     soup = BeautifulSoup(scraper_data['products_html'], 'html.parser')
     products = soup.find_all(class_='product-card')
-	
-    conn = get_conn()
+
+    users = {}
+    for user_info_list in scraper_data['creator_counts'].keys():
+        parsed_user_info_list = json.loads(user_info_list)
+        users[parsed_user_info_list[1]] = parsed_user_info_list[2]
+
     user_id = None
     for product in products:
         post_id = product['data-permalink']
-        purchase_id = product.find(class_='js-product')['data-purchase-id']
+        purchase_download_url = product.find(class_='js-product')['data-purchase-download-url']
         title = product.select_one('.description-container h1 strong').string
 
-        user_id_element = product.find(class_='preview-container')['data-asset-previews']
-        user_id_nums = re.findall(r"\d+", user_id_element)
-        user_id = get_value(list(filter(lambda el: len(el) == 13, user_id_nums)), 0)
-        if user_id is None:
-            user_name_element = get_value(product.find_all('a', {'class':'js-creator-profile-link'}), 0)
-            if user_name_element is None:
-                log(import_id, f'Skipping post {post_id}. Could not find user information.')
-                continue
-            else:
-                user_id = user_name_element.text.strip()
+        user_name_element = get_value(product.find_all('a', {'class':'js-creator-profile-link'}), 0)
+        if user_name_element is None:
+            log(import_id, f'Skipping post {post_id}. Could not find user information.')
+            continue
+        else:
+            user_id = users[user_name_element.text.strip()]
 
         file_directory = f"files/gumroad/{user_id}/{post_id}"
         attachments_directory = f"attachments/gumroad/{user_id}/{post_id}"
@@ -86,18 +86,9 @@ def import_posts(import_id, key, offset = 1):
             'file': {},
             'attachments': []
         }
-        
-        scraper2 = create_scrapper_session().get(
-            f"https://gumroad.com/library/purchases/{purchase_id}",
-            cookies = { '_gumroad_app_session': key },
-            proxies=get_proxy()
-        )
-        scraper_data2 = scraper2.text
-        soup2 = BeautifulSoup(scraper_data2, 'html.parser')
-        content_url = soup2.select_one('.button.button-primary.button-block')['href']
 
         scraper3 = create_scrapper_session().get(
-            content_url,
+            purchase_download_url,
             cookies = { '_gumroad_app_session': key },
             proxies=get_proxy()
         )
@@ -126,7 +117,7 @@ def import_posts(import_id, key, offset = 1):
         for _file in download_data['files']:
             filename, _ = download_file(
                 join(config.download_path, attachments_directory),
-                'https://gumroad.com' + download_data['download_info'][_file['id']]['download_url'],
+                'https://gumroad.com' + _file['download_url'],
                 name = f'{_file["file_name"]}.{_file["extension"].lower()}',
                 cookies = { '_gumroad_app_session': key }
             )
@@ -143,20 +134,22 @@ def import_posts(import_id, key, offset = 1):
         columns = post_model.keys()
         data = ['%s'] * len(post_model.values())
         data[-1] = '%s::jsonb[]' # attachments
-        query = "INSERT INTO posts ({fields}) VALUES ({values}) ON CONFLICT (id, service) UPDATE SET {updates}".format(
+        query = "INSERT INTO posts ({fields}) VALUES ({values}) ON CONFLICT (id, service) DO UPDATE SET {updates}".format(
             fields = ','.join(columns),
             values = ','.join(data),
             updates = ','.join([f'{column}=EXCLUDED.{column}' for column in columns])
         )
+        conn = get_raw_conn()
         cursor = conn.cursor()
         cursor.execute(query, list(post_model.values()))
         conn.commit()
+        return_conn(conn)
 
+        update_artist('gumroad', user_id)
         delete_post_flags('gumroad', user_id, post_id)
 
         if (config.ban_url):
             requests.request('BAN', f"{config.ban_url}/{post_model['service']}/user/" + post_model['"user"'])
-            requests.request('BAN', f"{config.ban_url}/api/{post_model['service']}/user/" + post_model['"user"'])
 
         log(import_id, f"Finished importing post {post_id} from user {user_id}", to_client = False)
 

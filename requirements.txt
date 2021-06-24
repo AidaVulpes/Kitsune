@@ -4,8 +4,9 @@ bs4==0.0.1
 certifi==2020.12.5
 chardet==3.0.4
 click==7.1.2
-cloudscraper==1.2.48
+cloudscraper==1.2.58
 colorama==0.4.4
+cssutils==2.3.0
 demjson==2.2.4
 Flask==1.1.2
 gallery-dl==1.16.0

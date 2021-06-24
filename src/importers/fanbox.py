@@ -13,8 +13,8 @@ from flask import current_app
 
 from PixivUtil2.PixivModelFanbox import FanboxArtist, FanboxPost
 
-from ..internals.database.database import get_conn
-from ..lib.artist import index_artists, is_artist_dnp
+from ..internals.database.database import get_conn, get_raw_conn, return_conn
+from ..lib.artist import index_artists, is_artist_dnp, update_artist
 from ..lib.post import post_flagged, post_exists, delete_post_flags, move_to_backup, delete_backup, restore_from_backup
 from ..internals.utils.proxy import get_proxy
 from ..internals.utils.download import download_file, DownloaderException
@@ -31,11 +31,11 @@ def import_posts(import_id, key, url = 'https://api.fanbox.cc/post.listSupportin
             proxies=get_proxy()
         )
         scraper_data = scraper.json()
+        scraper.raise_for_status()
     except requests.HTTPError:
         log(import_id, f'HTTP error when contacting Fanbox API ({url}). Stopping import.', 'exception')
         return
 
-    conn = get_conn()
     user_id = None
     posts_imported = []
     artists_with_posts_imported = []
@@ -173,22 +173,23 @@ def import_posts(import_id, key, url = 'https://api.fanbox.cc/post.listSupportin
                     values = ','.join(data),
                     updates = ','.join([f'{column}=EXCLUDED.{column}' for column in columns])
                 )
+                conn = get_raw_conn()
                 cursor = conn.cursor()
                 cursor.execute(query, list(post_model.values()))
                 conn.commit()
+                return_conn(conn)
 
+                update_artist('fanbox', user_id)
                 delete_post_flags('fanbox', user_id, post_id)
 
                 if (config.ban_url):
                     requests.request('BAN', f"{config.ban_url}/{post_model['service']}/user/" + post_model['"user"'])
-                    requests.request('BAN', f"{config.ban_url}/api/{post_model['service']}/user/" + post_model['"user"'])
 
                 if backup_path is not None:
                     delete_backup(backup_path)
                 log(import_id, f'Finished importing {post_id} for user {user_id}', to_client = False)
             except Exception as e:
                 log(import_id, f'Error importing post {post_id} from user {user_id}', 'exception')
-                conn.rollback()
 
                 if backup_path is not None:
                     restore_from_backup('fanbox', user_id, post_id, backup_path)

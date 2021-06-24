@@ -42,7 +42,4 @@ def get_conn():
 
 def return_conn(conn):
     if conn is not None:
-        try:
-            pool.putconn(conn)
-        except:
-            pass
+        pool.putconn(conn)

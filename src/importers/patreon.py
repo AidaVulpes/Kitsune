@@ -17,8 +17,8 @@ from gallery_dl import text
 
 from flask import current_app
 
-from ..internals.database.database import get_conn
-from ..lib.artist import index_artists, is_artist_dnp
+from ..internals.database.database import get_conn, get_raw_conn, return_conn
+from ..lib.artist import index_artists, is_artist_dnp, update_artist
 from ..lib.post import post_flagged, post_exists, delete_post_flags, move_to_backup, delete_backup, restore_from_backup
 from ..internals.utils.download import download_file, DownloaderException
 from ..internals.utils.proxy import get_proxy
@@ -320,7 +320,6 @@ def import_campaign_page(url, key, import_id):
         log(import_id, 'Error connecting to cloudscraper. Please try again.', 'exception')
         return
     
-    conn = get_conn()
     user_id = None
     for post in scraper_data['data']:
         backup_path = None
@@ -443,22 +442,23 @@ def import_campaign_page(url, key, import_id):
                 values = ','.join(data),
                 updates = ','.join([f'{column}=EXCLUDED.{column}' for column in columns])
             )
+            conn = get_raw_conn()
             cursor = conn.cursor()
             cursor.execute(query, list(post_model.values()))
             conn.commit()
+            return_conn(conn)
 
+            update_artist('patreon', user_id)
             delete_post_flags('patreon', user_id, post_id)
             
             if (config.ban_url):
                 requests.request('BAN', f"{config.ban_url}/{post_model['service']}/user/" + post_model['"user"'])
-                requests.request('BAN', f"{config.ban_url}/api/{post_model['service']}/user/" + post_model['"user"'])
 
             if backup_path is not None:
                 delete_backup(backup_path)
             log(import_id, f"Finished importing {post_id} from user {user_id}", to_client=False)
         except Exception as e:
             log(import_id, f"Error while importing {post_id} from user {user_id}", 'exception', True)
-            conn.rollback()
             if backup_path is not None:
                 restore_from_backup('patreon', user_id, post_id, backup_path)
             continue

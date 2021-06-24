@@ -18,7 +18,7 @@ def import_banner(service, user):
     if not exists(join(config.download_path, 'banners', service, user)):
         try:
             if service == 'patreon':
-                scraper = cloudscraper.create_scraper().get('https://www.patreon.com/api/user/' + user, proxies=get_proxy())
+                scraper = cloudscraper.create_scraper().get('https://api.patreon.com/user/' + user, proxies=get_proxy())
                 data = scraper.json()
                 scraper.raise_for_status()
                 if data.get('included') and data['included'][0]['attributes'].get('cover_photo_url'):
